@@ -8,6 +8,6 @@ run: Dockerfile
 	docker run -d -p 80:80 -v /var/local/media:/var/local/media flo/nginx-proxy-and-streaming-media
 
 shell: Dockerfile
-	docker run -it -p 80:80 -v /var/local/media:/var/local/media flo/nginx-proxy-and-streaming-media /bin/sh
+	docker run -it -p 80:80 -v /var/local/media:/var/local/media flo/nginx-proxy-and-streaming-media /bin/zsh
 
 .PHONY: build run shell
