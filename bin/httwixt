@@ -24,26 +24,30 @@ if (!defined caller) {
     #   - inetd/xinetd
     print(VERSION, "\n"), exit 0
         if @ARGV == 1 && $ARGV[0] eq '--version';
-    my $uri_base = $ENV{'HTTWIXT_URI_BASE'} || 'http://localhost';
     my $root = $ENV{'HTTWIXT_ROOT'} || $ENV{'DOCUMENT_ROOT'} || '/var/local/httwixt';
-    my ($public_dir, $private_dir) = qw(public private);
-    my $redirect_status  = '302';
     my $config_file;
     my $verbose;
     my $cls;
+    my %def = (
+        'uri_base' => $ENV{'HTTWIXT_URI_BASE'} || 'http://localhost',
+        'private_dir' => 'private',
+        'public_dir' => 'public',
+        'redirect_status' => '302',
+    );
+    my %opt;
     GetOptions(
         'D|daemon' => sub { $cls = __PACKAGE__ . '::Daemon' },
         'I|inetd'  => sub { $cls = __PACKAGE__ . '::Inetd'  },
         'C|cgi'    => sub { $cls = __PACKAGE__ . '::CGI'    },
         'F|fcgi'   => sub { $cls = __PACKAGE__ . '::FCGI'   },
         'T|term'   => sub { $cls = __PACKAGE__ . '::Term'   },
-        'c|config-file=s' => \$config_file,
-        'u|uri-base=s' => \$uri_base,
         'r|root=s' => \$root,
-        'p|public=s' => \$public_dir,
-        'q|private=s' => \$private_dir,
-        's|redirect-status=i' => \$redirect_status,
-        'v|verbose' => \$verbose,
+        'c|config-file=s' => \$config_file,
+        'u|uri-base=s' => sub { $opt{'uri_base'} = $_[1] },
+        'p|public=s' => sub { $opt{'public_dir'} = $_[1] },
+        'q|private=s' => sub { $opt{'private_dir'} = $_[1] },
+        's|redirect-status=i' => sub { $opt{'redirect_status'} = $_[1] },
+        'v|verbose' => sub { $opt{'verbose'} = 1 },
     ) or die;
     $cls ||= 'HTTP::Twixt::' . (
         -t STDERR    ? 'Term'   :
@@ -52,18 +56,15 @@ if (!defined caller) {
         $0 =~ /xtd$/ ? 'Daemon' :
                        'Inetd'
     );
-    my $self = bless {
-        'uri_base' => $uri_base,
-        'root' => $root,
-        'public_dir' => $public_dir,
-        'private_dir' => $private_dir,
-        'redirect_status' => $redirect_status,
-        'verbose' => $verbose,
-    }, $cls;
-    if (defined $config_file) {
-        $config_file = "$root/$config_file" if $config_file !~ m{^/};
-        $self->read_config_file($config_file);
-    }
+    my $self = $cls->new(
+        'config' => {
+            'root' => $root,
+            %def,
+            read_config($root, $config_file),
+            %opt,
+        },
+    );
+    $self->init;
     $self->run;
 }
 
@@ -72,9 +73,18 @@ sub new {
     bless { @_ }, $cls;
 }
 
-sub read_config_file {
-    my ($self, $f) = @_;
+sub init { }
+
+sub read_config {
+    my ($root, $f) = @_;
     my %config;
+    if (!defined $f) {
+        return if !-e "$root/httwixt.conf";
+        $f = "$root/httwixt.conf";
+    }
+    elsif ($f !~ m{^/}) {
+        $f = "$root/$f" ;
+    }
     open my $fh, '<', $f or die "open $f: $!";
     while (<$fh>) {
         if (/^([A-Za-z]\w+)\s+(.+)$/) {
@@ -84,12 +94,13 @@ sub read_config_file {
             die "bad line in config $f: $_";
         }
     }
-    return $self->{'config'} = \%config;
+    return %config;
 }
 
 sub process {
     my ($self) = @_;
-    my ($root, $pub, $prv, $red) = @$self{
+    my $config = $self->{'config'};
+    my ($root, $pub, $prv, $red) = @$config{
         qw(root public_dir private_dir redirect_status)
     };
     my ($hash, $url, $tpl) = eval { 
@@ -129,7 +140,8 @@ sub run {
 sub check_options {
     my ($self) = @_;
     # Make sure we have absolute paths to the public and private directories
-    my ($root, $pub, $prv, $red) = @$self{
+    my $config = $self->{'config'};
+    my ($root, $pub, $prv, $red) = @$config{
         qw(root public_dir private_dir redirect_status)
     };
     $pub = "$root/$pub" if $pub !~ m{^/};
@@ -140,7 +152,7 @@ sub check_options {
     die "no such directory: $prv"  if !-d $prv;
     # Redirects must use a 3xx status code
     die if $red !~ /^3[0-9][0-9]$/;
-    @$self{
+    @$config{
         qw(root public_dir private_dir redirect_status)
     } = ($root, $pub, $prv, $red);
 }
@@ -153,7 +165,8 @@ sub process_template {
 
 sub publish {
     my ($self, $path) = @_;
-    my ($root, $pub, $prv, $red) = @$self{
+    my $config = $self->{'config'};
+    my ($root, $pub, $prv, $red) = @$config{
         qw(root public_dir private_dir redirect_status)
     };
     # Read the HTTP request and find the desired file
@@ -166,10 +179,10 @@ sub publish {
     die if !mkdir $dst;
     die if !symlink "$src/$file", "$dst/$file";
     # Find a template for the HTTP response
-    my $base = $self->{'config'}{'uri_base'} ||= $self->{'uri_base'};
+    my $base = $config->{'uri_base'};
     my $url = join('/', $base, $hash, $file);
     my $tpl = $self->template($coll, $file);
-    print STDERR "httwixt: published $prv$path as $pub/$hash/$file\n" if $self->{'verbose'};
+    print STDERR "httwixt: published $prv$path as $pub/$hash/$file\n" if $config->{'verbose'};
     return ($hash, $url, $tpl);
 }
 
@@ -184,7 +197,8 @@ sub digest {
 
 sub template {
     my ($self, $coll, $file) = @_;
-    my ($root, $pub, $prv, $red) = @$self{
+    my $config = $self->{'config'};
+    my ($root, $pub, $prv, $red) = @$config{
         qw(root public_dir private_dir redirect_status)
     };
     my $dir = "$prv/$coll";
@@ -292,7 +306,7 @@ use base qw(Net::Server::HTTP HTTP::Twixt);
 sub run {
     my ($self) = @_;
     eval "use Net::Server::HTTP; 1" or die;
-    my $config = $self->{'config'} ||= {};
+    my $config = $self->{config} = $self->{server}{config};
     $config->{'port'} ||= 22080;
     $self->check_options;
     $self->SUPER::run(
