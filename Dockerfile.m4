@@ -6,8 +6,8 @@ define(`RTMPMOD', `SRCDIR/nginx-NGINXVERSION/debian/modules/nginx-rtmp-module-RT
 define(`VODMOD', `SRCDIR/nginx-NGINXVERSION/debian/modules/nginx-vod-module-VODVERSION')dnl
 define(`NGINXURL', `http://nginx.org/download/nginx-'NGINXVERSION.tar.gz)dnl
 define(`RTMPURL', `https://github.com/arut/nginx-rtmp-module/archive/v'RTMPVERSION`.tar.gz')dnl
-define(`NGINXPKG', NGINXVERSION`-1~jessie')
-define(`NGINXDEB', `nginx_'NGINXVERSION`-1~jessie_amd64.deb')
+define(`NGINXPKG', NGINXVERSION`-1~jessie')dnl
+define(`NGINXDEB', `nginx_'NGINXVERSION`-1~jessie_amd64.deb')dnl
 dnl
 FROM buildpack-deps:jessie
 
