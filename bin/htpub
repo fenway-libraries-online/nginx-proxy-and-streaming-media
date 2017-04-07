@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use base qw(Net::Server::HTTP);
+
+use CGI;
+use Digest::SHA qw(sha256_hex);
+use Getopt::Long
+    qw(:config posix_default gnu_compat require_order bundling no_ignore_case);
+
+my %status = (
+    200 => '200 OK',
+    302 => '302 Found',
+    404 => '404 Not Found',
+    500 => '500 Internal Server Error',
+);
+
+my $uri_base = $ENV{'HTPUB_URI_BASE'}     || 'http://localhost';
+my $root     = $ENV{'HTPUB_ROOT'}         || '/var/local/media';
+my $port     = $ENV{'HTPUB_PORT'}         || 22080;
+my $priv     = $ENV{'HTPUB_PRIVATE_ROOT'};
+my $pub      = $ENV{'HTPUB_PUBLIC_ROOT'};
+my $salt     = '2b6682e498ee49e12c2d022555bb6d4c30cd7ab8f66cfec9eb85c68f41383e0d';
+my $config;
+my $interactive = -t STDOUT || -t STDIN;
+
+GetOptions(
+    'd|daemon' => sub { $interactive = 0 },
+    'c|config=s' => sub { read_config($config = path($_[1])) },
+    'x|private=s' => \$priv,
+    'u|public=s' => \$pub,
+    'p|port=i' => \$port,
+) or usage();
+
+if (!defined $config) {
+    $config = $ENV{'HTPUB_CONFIG'} || "$root/htpub.conf";
+    read_config($config) if -e $config;
+}
+$priv = path($priv // 'private');
+$pub  = path($pub  // 'public');
+if ($interactive) {
+    usage() if @ARGV != 1;
+    ($ENV{'PATH_INFO'}) = @ARGV;
+    process_http_request();
+    exit 0;
+}
+else {
+    __PACKAGE__->run('port' => $port);
+}
+ 
+sub process_http_request {
+    my $self = shift;
+    my $ok;
+    eval {
+        my $q = CGI->new;
+        my $path = $q->path_info;  # e.g., /mca/video/baraka
+        $path =~ s{^/}{};
+        $path =~ s{(/[^/.]+\.html)?$}{};
+        my $leaf = $1 || '/';
+        my $dir = "$priv/$path/pub";
+        my $dest = "$dir$leaf";
+        if (-e $dest) {
+            my $hash = substr sha256_hex($salt, time, $$, rand), 0, 24;
+            symlink $dir, "$pub/$hash" or die;
+            my $loc = "$uri_base/$hash$leaf";
+            reply(302, qq{Redirecting to <a href="$loc">...}, Location => $loc);
+        }
+        else {
+            reply(404, 'The requested resource was not found.');
+        }
+        $ok = 1;
+    };
+    return if $ok;
+    reply(500, 'An error occurred.');
+    print STDERR $@;
+}
+
+sub path {
+    my ($f) = @_;
+    return $f =~ m{/} ? $f : "$root/$f";
+}
+
+sub reply {
+    my ($code, $html, %header) = @_;
+    print "Status: $status{$code}\n";
+    foreach my $k (sort keys %header) {
+        my $v = $header{$k} // next;
+        print "$k: $v\n";
+    }
+    if (defined $html) {
+        $html = "<html>\n$html\n</html>\n";
+        my $len = length $html;
+        print <<"EOS", "\n", $html;
+Content-Type: text/html
+Content-Length: $len
+EOS
+    }
+    else {
+        print "\n";
+    }
+}
+
+sub read_config {
+    my ($f) = @_;
+    open my $fh, '<', $f or fatal("open $f: $!");
+    while (<$fh>) {
+        next if /^\s*(?:#.*)?$/;  # Skip blank lines and comments
+        chomp;
+        s/\s+#.*//;  # Strip trailing comments
+        s/\s+/ /g;
+        s/^ | $//g;
+        $root       = $1, next if /^root = (\S+)$/i;
+        $uri_base   = $1, next if /^uri base = (\S+)$/i;
+        $priv = path($1), next if /^private root = (\S+)$/i;
+        $pub  = path($1), next if /^public root = (\S+)$/i;
+        $port       = $1, next if /^port = (\d+)$/i;
+        $salt       = $1, next if /^salt = (\S+)$/i;
+        fatal("unrecognized config: $_");
+    }
+}
+
+sub fatal {
+    print STDERR @_;
+    exit 2;
+}
+
+sub usage {
+    print STDERR "usage: htpub [-d] [-c CONFIG] [-u PUB] [-x PRIV] [-p PORT] [PATH]\n";
+    print STDERR $_, "\n" for @_;
+    exit 1;
+}
+
