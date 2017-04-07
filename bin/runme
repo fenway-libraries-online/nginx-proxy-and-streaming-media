@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/sh -x
 
 nginx -g 'daemon off;' &
 while true; do
-    httwixt -D -r /var/local/media -c httwixt.conf
-    sleep 1
+    htpub -d -c /var/local/media/htpub.conf 2>> /var/local/media/log/htpub.log
+    sleep 5
 done
