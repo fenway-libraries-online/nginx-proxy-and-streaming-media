@@ -1,0 +1,12 @@
+[Unit]
+Description=Nginx proxy and streaming media server
+Requires=docker.service
+After=docker.service
+
+[Service]
+Restart=always
+ExecStart=/bin/make -C /var/local/media/proj start
+ExecStop=/bin/make -C /var/local/media/proj stop
+
+[Install]
+WantedBy=default.target

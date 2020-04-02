@@ -6,10 +6,15 @@ build: Dockerfile
 Dockerfile: Dockerfile.m4
 	m4 < $< > $@
 
+start: run
+
 run: Dockerfile
-	docker run -d -p 80:80 -v /var/local/media:/var/local/media $(TAG)
+	docker run -d -p 80:80 --net=host -v /var/local/media:/var/local/media $(TAG)
+
+stop: 
+	docker stop `docker ps -f ancestor=$(TAG) --format='{{.ID}}'`
 
 shell: Dockerfile
-	docker exec -it `docker ps -f ancestor=$(TAG) --format='{{.ID}}'` bash
+	docker exec -it `docker ps -f ancestor=$(TAG) --format='{{.ID}}'` zsh
 
-.PHONY: build run shell
+.PHONY: build start run stop shell
